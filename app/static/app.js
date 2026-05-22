@@ -66,11 +66,15 @@ function toast(message, undo) {
 function showAuth() {
   $("auth-view").hidden = false;
   $("app-view").hidden = true;
+  $("auth-view").style.display = "grid";
+  $("app-view").style.display = "none";
 }
 
 function showApp() {
   $("auth-view").hidden = true;
   $("app-view").hidden = false;
+  $("auth-view").style.display = "none";
+  $("app-view").style.display = "block";
   $("user-name").textContent = state.user.display_name;
 }
 
