@@ -118,7 +118,9 @@ function filteredDopes() {
   if (query) {
     const fuse = new Fuse(items.map((d) => ({ ...d, searchText: searchableText(d) })), {
       keys: ["title", "searchText"],
-      threshold: 0.42,
+      threshold: 0.6,
+      distance: 120,
+      ignoreLocation: true,
       includeScore: true,
     });
     items = fuse.search(query).map((r) => r.item);
