@@ -96,6 +96,14 @@ def init_db() -> None:
               edited_at TEXT NOT NULL,
               UNIQUE(dope_id, version_number)
             );
+
+            CREATE TABLE IF NOT EXISTS dope_dependencies (
+              dope_id INTEGER NOT NULL REFERENCES dopes(id) ON DELETE CASCADE,
+              depends_on_id INTEGER NOT NULL REFERENCES dopes(id) ON DELETE CASCADE,
+              created_at TEXT NOT NULL,
+              PRIMARY KEY (dope_id, depends_on_id),
+              CHECK (dope_id != depends_on_id)
+            );
             """
         )
         conn.execute(
@@ -187,11 +195,13 @@ class DopeIn(BaseModel):
     title: str = Field(min_length=1, max_length=180)
     description_html: str = Field(min_length=1, max_length=250_000)
     time_text: str = Field(min_length=1, max_length=40)
+    dependency_ids: list[int] = Field(default_factory=list, max_length=50)
 
 
 class DopeEditIn(BaseModel):
     title: str = Field(min_length=1, max_length=180)
     description_html: str = Field(min_length=1, max_length=250_000)
+    dependency_ids: list[int] = Field(default_factory=list, max_length=50)
 
 
 class CompleteIn(BaseModel):
@@ -251,6 +261,80 @@ def add_dope_version(
     )
 
 
+def clean_dependency_ids(raw_ids: list[int], dope_id: int) -> list[int]:
+    seen: set[int] = set()
+    ids: list[int] = []
+    for raw_id in raw_ids:
+        dep_id = int(raw_id)
+        if dep_id == dope_id or dep_id in seen:
+            continue
+        seen.add(dep_id)
+        ids.append(dep_id)
+    return ids
+
+
+def assert_dependencies_allowed(conn: sqlite3.Connection, dope_id: int, dependency_ids: list[int]) -> list[int]:
+    ids = clean_dependency_ids(dependency_ids, dope_id)
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT id FROM dopes WHERE archived_at IS NULL AND id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    found = {row["id"] for row in rows}
+    missing = [dep_id for dep_id in ids if dep_id not in found]
+    if missing:
+        raise HTTPException(status_code=400, detail="Dependency dope not found")
+
+    graph: dict[int, list[int]] = {}
+    edges = conn.execute(
+        "SELECT dope_id, depends_on_id FROM dope_dependencies WHERE dope_id != ?",
+        (dope_id,),
+    ).fetchall()
+    for edge in edges:
+        graph.setdefault(edge["dope_id"], []).append(edge["depends_on_id"])
+    graph[dope_id] = ids
+
+    def reaches_source(start: int) -> bool:
+        stack = [start]
+        visited: set[int] = set()
+        while stack:
+            current = stack.pop()
+            if current == dope_id:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            stack.extend(graph.get(current, []))
+        return False
+
+    if any(reaches_source(dep_id) for dep_id in ids):
+        raise HTTPException(status_code=400, detail="Circular dependencies are not allowed")
+    return ids
+
+
+def set_dope_dependencies(conn: sqlite3.Connection, dope_id: int, dependency_ids: list[int]) -> None:
+    ids = assert_dependencies_allowed(conn, dope_id, dependency_ids)
+    conn.execute("DELETE FROM dope_dependencies WHERE dope_id = ?", (dope_id,))
+    conn.executemany(
+        "INSERT INTO dope_dependencies (dope_id, depends_on_id, created_at) VALUES (?, ?, ?)",
+        [(dope_id, dep_id, now_iso()) for dep_id in ids],
+    )
+
+
+def incomplete_dependency_rows(conn: sqlite3.Connection, dope_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT d.* FROM dope_dependencies dd
+        JOIN dopes d ON d.id = dd.depends_on_id
+        WHERE dd.dope_id = ? AND d.completed_at IS NULL
+        ORDER BY d.id DESC
+        """,
+        (dope_id,),
+    ).fetchall()
+
+
 def dope_payload(row: sqlite3.Row, conn: sqlite3.Connection) -> dict[str, Any]:
     users = {
         u["id"]: u
@@ -278,6 +362,28 @@ def dope_payload(row: sqlite3.Row, conn: sqlite3.Connection) -> dict[str, Any]:
         """,
         (row["id"],),
     ).fetchall()
+    dependencies = conn.execute(
+        """
+        SELECT d.id, d.title, d.time_minutes, d.completed_at, d.archived_at
+        FROM dope_dependencies dd
+        JOIN dopes d ON d.id = dd.depends_on_id
+        WHERE dd.dope_id = ?
+        ORDER BY d.completed_at IS NULL DESC, d.id DESC
+        """,
+        (row["id"],),
+    ).fetchall()
+    dependent_count = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM dope_dependencies dd
+        JOIN dopes child ON child.id = dd.dope_id
+        WHERE dd.depends_on_id = ?
+          AND child.archived_at IS NULL
+          AND child.completed_at IS NULL
+        """,
+        (row["id"],),
+    ).fetchone()[0]
+    blocked_dependencies = [dep for dep in dependencies if dep["completed_at"] is None]
     return {
         "id": row["id"],
         "title": row["title"],
@@ -295,6 +401,26 @@ def dope_payload(row: sqlite3.Row, conn: sqlite3.Connection) -> dict[str, Any]:
         "archived_by": user_public(users.get(row["archived_by"])),
         "assignment_history": [dict(h) for h in history],
         "commit_links": [l["url"] for l in links],
+        "dependencies": [
+            {
+                "id": dep["id"],
+                "title": dep["title"],
+                "time_minutes": dep["time_minutes"],
+                "status": "archived" if dep["archived_at"] else "completed" if dep["completed_at"] else "active",
+                "completed_at": dep["completed_at"],
+            }
+            for dep in dependencies
+        ],
+        "blocked_dependencies": [
+            {
+                "id": dep["id"],
+                "title": dep["title"],
+                "time_minutes": dep["time_minutes"],
+                "status": "archived" if dep["archived_at"] else "active",
+            }
+            for dep in blocked_dependencies
+        ],
+        "dependent_count": dependent_count,
         "versions": [
             {
                 "id": v["id"],
@@ -367,7 +493,19 @@ def list_dopes(status: str = "active", user_cookie: str | None = Cookie(default=
     }.get(status)
     if not where:
         raise HTTPException(status_code=400, detail="Bad status")
-    order = "completed_at DESC, id DESC" if status == "completed" else "id DESC"
+    if status == "active":
+        order = """
+        (
+          SELECT COUNT(*)
+          FROM dope_dependencies dd
+          JOIN dopes child ON child.id = dd.dope_id
+          WHERE dd.depends_on_id = dopes.id
+            AND child.archived_at IS NULL
+            AND child.completed_at IS NULL
+        ) DESC, id DESC
+        """
+    else:
+        order = "completed_at DESC, id DESC" if status == "completed" else "id DESC"
     with db() as conn:
         rows = conn.execute(f"SELECT * FROM dopes WHERE {where} ORDER BY {order}").fetchall()
         return [dope_payload(row, conn) for row in rows]
@@ -385,7 +523,9 @@ def create_dope(data: DopeIn, user_cookie: str | None = Cookie(default=None, ali
             """,
             (data.title.strip(), data.description_html, minutes, user["id"], now_iso()),
         )
-        add_dope_version(conn, int(cur.lastrowid), data.title.strip(), data.description_html, user["id"], now_iso())
+        dope_id = int(cur.lastrowid)
+        set_dope_dependencies(conn, dope_id, data.dependency_ids)
+        add_dope_version(conn, dope_id, data.title.strip(), data.description_html, user["id"], now_iso())
         row = conn.execute("SELECT * FROM dopes WHERE id = ?", (cur.lastrowid,)).fetchone()
         return dope_payload(row, conn)
 
@@ -405,6 +545,7 @@ def edit_dope(dope_id: int, data: DopeEditIn, user_cookie: str | None = Cookie(d
                 (title, data.description_html, dope_id),
             )
             add_dope_version(conn, dope_id, title, data.description_html, user["id"], edited_at)
+        set_dope_dependencies(conn, dope_id, data.dependency_ids)
         return dope_payload(conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone(), conn)
 
 
@@ -416,6 +557,8 @@ def assign_dope(dope_id: int, user_cookie: str | None = Cookie(default=None, ali
         row = conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone()
         if not row or row["archived_at"] or row["completed_at"]:
             raise HTTPException(status_code=404, detail="Active dope not found")
+        if incomplete_dependency_rows(conn, dope_id):
+            raise HTTPException(status_code=400, detail="Dependencies Undoped")
         conn.execute(
             "UPDATE dopes SET assigned_to = ?, assigned_at = ? WHERE id = ?",
             (user["id"], assigned_at, dope_id),
@@ -464,6 +607,8 @@ def complete_dope(dope_id: int, data: CompleteIn, user_cookie: str | None = Cook
         row = conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone()
         if not row or row["archived_at"] or row["completed_at"]:
             raise HTTPException(status_code=404, detail="Active dope not found")
+        if incomplete_dependency_rows(conn, dope_id):
+            raise HTTPException(status_code=400, detail="Dependencies Undoped")
         conn.execute(
             """
             UPDATE dopes

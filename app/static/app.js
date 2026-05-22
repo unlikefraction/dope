@@ -2,6 +2,7 @@ const state = {
   user: null,
   route: "active",
   dopes: [],
+  allDopes: [],
   filters: { min: "", max: "", completedBy: "", from: "", to: "" },
   authMode: "login",
 };
@@ -117,7 +118,14 @@ async function loadRoute() {
   $("active-assigned-wrap").style.display = state.route === "active" ? "block" : "none";
   $("completed-filters").style.display = state.route === "completed" ? "block" : "none";
   state.dopes = await api(`/api/dopes?status=${state.route}`);
+  state.allDopes = [];
   render();
+}
+
+async function ensureAllDopes(force = false) {
+  if (!force && state.allDopes.length) return state.allDopes;
+  state.allDopes = await api("/api/dopes?status=all");
+  return state.allDopes;
 }
 
 function searchableText(d) {
@@ -170,7 +178,10 @@ function card(d) {
     d.assigned_to ? `Assigned to ${escapeHtml(d.assigned_to.display_name)}` : "";
   return `<button class="dope-card" data-dope="${d.id}">
     <span><h3>${escapeHtml(d.title)}</h3>${status ? `<span class="meta"><span>${status}</span></span>` : ""}</span>
-    <span class="pill"><i class="ph ph-clock"></i>${formatMinutes(d.time_minutes)}</span>
+    <span class="card-pills">
+      ${d.dependent_count ? `<span class="pill"><i class="ph ph-tree-structure"></i>${d.dependent_count} ${d.dependent_count === 1 ? "dependent" : "dependents"}</span>` : ""}
+      <span class="pill"><i class="ph ph-clock"></i>${formatMinutes(d.time_minutes)}</span>
+    </span>
   </button>`;
 }
 
@@ -192,7 +203,57 @@ function sanitizeHtml(html) {
   return doc.body.innerHTML;
 }
 
-function openNewDope() {
+function dependencyPickerHtml(selectedIds = [], excludeId = null) {
+  const selected = new Set(selectedIds.map(Number));
+  const candidates = state.allDopes
+    .filter((d) => d.id !== excludeId && d.status !== "archived")
+    .sort((a, b) => a.title.localeCompare(b.title));
+  const options = candidates.length ? candidates.map((d) => `
+    <label class="dependency-option" data-dependency-option-row>
+      <input type="checkbox" data-dependency-option value="${d.id}" ${selected.has(d.id) ? "checked" : ""}>
+      <span>
+        <strong>${escapeHtml(d.title)}</strong>
+        <small>${d.status === "completed" ? "Doped" : "Undoped"} - ${formatMinutes(d.time_minutes)}</small>
+      </span>
+    </label>
+  `).join("") : `<p class="empty mini">No dopes available yet.</p>`;
+  return `
+    <section class="dependency-picker">
+      <button id="dependency-toggle" class="secondary" type="button"><i class="ph ph-link-simple"></i>Add dependencies</button>
+      <div id="dependency-panel" class="dependency-panel" hidden>
+        <label class="dependency-search"><i class="ph ph-magnifying-glass"></i><input id="dependency-search" name="dope_dependency_query" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Search dopes"></label>
+        <div class="dependency-list">${options}</div>
+      </div>
+    </section>
+  `;
+}
+
+function bindDependencyPicker(expanded = false) {
+  const toggle = $("dependency-toggle");
+  const panel = $("dependency-panel");
+  const search = $("dependency-search");
+  if (!toggle || !panel) return;
+  panel.hidden = !expanded;
+  toggle.onclick = (event) => {
+    event.preventDefault();
+    panel.hidden = !panel.hidden;
+  };
+  if (search) {
+    search.oninput = () => {
+      const query = search.value.trim().toLowerCase();
+      document.querySelectorAll("[data-dependency-option-row]").forEach((row) => {
+        row.hidden = query && !row.textContent.toLowerCase().includes(query);
+      });
+    };
+  }
+}
+
+function selectedDependencyIds() {
+  return [...document.querySelectorAll("[data-dependency-option]:checked")].map((input) => Number(input.value));
+}
+
+async function openNewDope() {
+  await ensureAllDopes(true);
   $("modal-title").hidden = true;
   $("modal-title").textContent = "New Dope";
   $("modal-body").innerHTML = `
@@ -201,10 +262,12 @@ function openNewDope() {
       <label>Title<input id="new-title" name="dope_new_title" autocomplete="off" autocapitalize="sentences" spellcheck="true" placeholder="Improve onboarding empty state"></label>
       <label>Description<div id="new-description" class="editor" contenteditable="true" data-placeholder="Write details. Paste images directly here."></div></label>
       <label>Time to complete<input id="new-time" name="dope_new_time" autocomplete="off" placeholder="2hr, 30min, 0.5hr"></label>
+      ${dependencyPickerHtml()}
     </div>
     <div class="modal-action-bar"><button id="create-dope" class="primary-wide" value="default">Create Dope</button></div>
   `;
   wireEditor($("new-description"));
+  bindDependencyPicker();
   $("create-dope").onclick = async (event) => {
     event.preventDefault();
     try {
@@ -214,6 +277,7 @@ function openNewDope() {
           title: $("new-title").value,
           description_html: sanitizeHtml($("new-description").innerHTML),
           time_text: $("new-time").value,
+          dependency_ids: selectedDependencyIds(),
         }),
       });
       $("dope-dialog").close();
@@ -235,8 +299,12 @@ function wireEditor(editor) {
   });
 }
 
-function openDope(id) {
-  const d = state.dopes.find((item) => item.id === id);
+async function openDope(id) {
+  let d = state.dopes.find((item) => item.id === id) || state.allDopes.find((item) => item.id === id);
+  if (!d) {
+    await ensureAllDopes(true);
+    d = state.allDopes.find((item) => item.id === id);
+  }
   if (!d) return;
   $("modal-title").hidden = true;
   $("modal-title").textContent = d.title;
@@ -246,6 +314,18 @@ function openDope(id) {
   const versionOptions = versions.map((v) => `<option value="${v.version_number}">v${v.version_number} - ${localDate(v.edited_at)} by ${escapeHtml(v.edited_by?.display_name || "someone")}</option>`).join("");
   const history = d.assignment_history.length ? `<h2>Assignment History</h2><ul class="history">${d.assignment_history.map((h) => `<li>${escapeHtml(h.display_name)} tried this on ${fullDate(h.assigned_at)}${h.unassigned_at ? ` and unassigned on ${fullDate(h.unassigned_at)}` : ""}</li>`).join("")}</ul>` : "";
   const links = d.commit_links.length ? `<h2>Commits</h2><ul class="links">${d.commit_links.map((l) => `<li><a href="${escapeHtml(l)}" target="_blank" rel="noreferrer">${escapeHtml(l)}</a></li>`).join("")}</ul>` : "";
+  const blocked = (d.blocked_dependencies || []).length > 0;
+  const dependencies = d.dependencies?.length ? `
+    <section class="dependency-links-wrap">
+      <h2>Dependencies</h2>
+      <div class="dependency-links">
+        ${d.dependencies.map((dep) => `<button class="dependency-link" data-dependency-open="${dep.id}" value="default">
+          <span>${escapeHtml(dep.title)}</span>
+          <small>${dep.status === "completed" ? "Doped" : "Undoped"}</small>
+        </button>`).join("")}
+      </div>
+    </section>
+  ` : "";
   $("modal-body").innerHTML = `
     <div id="modal-topbar" class="modal-topbar"><strong>${escapeHtml(d.title)}</strong><button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button></div>
     <div class="modal-content">
@@ -262,6 +342,7 @@ function openDope(id) {
       </div>
       ${editCount ? `<label id="version-picker-wrap" class="version-picker" hidden>Read version<select id="version-picker">${versionOptions}</select></label>` : ""}
       <h2 id="dope-version-title">${escapeHtml(activeVersion.title)}</h2>
+      ${dependencies}
       <div id="dope-version-description" class="description">${sanitizeHtml(activeVersion.description_html)}</div>
       ${d.completion_description ? `<h2>Completion Notes</h2><p class="muted">${escapeHtml(d.completion_description)}</p>` : ""}
       ${links}
@@ -271,10 +352,17 @@ function openDope(id) {
       ${d.status !== "archived" ? `<button id="edit-dope" class="icon-action secondary" value="default" title="Edit"><i class="ph ph-pencil-simple"></i></button>` : ""}
       ${d.status !== "archived" ? `<button id="archive" class="icon-action danger" value="default" title="Archive"><i class="ph ph-archive"></i></button>` : `<button id="restore" class="secondary" value="default"><i class="ph ph-arrow-counter-clockwise"></i>Restore</button>`}
       ${d.status === "active" && d.assigned_to ? `<button id="unassign" class="non-cta" value="default"><i class="ph ph-user-minus"></i>Unassign Dope</button>` : ""}
-      ${d.status === "active" && !d.assigned_to ? `<button id="assign" class="primary-wide" value="default"><i class="ph ph-target"></i>I'll take it</button>` : ""}
-      ${d.status === "active" ? `<button id="complete" class="${d.assigned_to ? "primary-wide" : "secondary action-text"}" value="default"><i class="ph ph-confetti"></i>Doped</button>` : ""}
+      ${d.status === "active" && blocked ? `<button class="primary-wide" value="default" disabled><i class="ph ph-warning-circle"></i>Dependencies Undoped</button>` : ""}
+      ${d.status === "active" && !blocked && !d.assigned_to ? `<button id="assign" class="primary-wide" value="default"><i class="ph ph-target"></i>I'll take it</button>` : ""}
+      ${d.status === "active" && !blocked ? `<button id="complete" class="${d.assigned_to ? "primary-wide" : "secondary action-text"}" value="default"><i class="ph ph-confetti"></i>Doped</button>` : ""}
     </div>
   `;
+  document.querySelectorAll("[data-dependency-open]").forEach((el) => {
+    el.onclick = (event) => {
+      event.preventDefault();
+      openDope(Number(el.dataset.dependencyOpen));
+    };
+  });
   bindDopeActions(d);
   bindVersionControls(d);
   $("dope-dialog").showModal();
@@ -336,7 +424,8 @@ function bindModalChrome(title) {
   };
 }
 
-function openEditDope(d) {
+async function openEditDope(d) {
+  await ensureAllDopes(true);
   $("modal-title").hidden = true;
   $("modal-title").textContent = "Edit Dope";
   $("modal-body").innerHTML = `
@@ -344,12 +433,14 @@ function openEditDope(d) {
     <div class="modal-content">
       <label>Title<input id="edit-title" name="dope_edit_title" autocomplete="off" autocapitalize="sentences" spellcheck="true" value="${escapeHtml(d.title)}"></label>
       <label>Description<div id="edit-description" class="editor" contenteditable="true" data-placeholder="Write details. Paste images directly here.">${sanitizeHtml(d.description_html)}</div></label>
+      ${dependencyPickerHtml((d.dependencies || []).map((dep) => dep.id), d.id)}
     </div>
     <div class="modal-action-bar">
       <button id="save-edit" class="primary-wide" value="default"><i class="ph ph-floppy-disk"></i>Save edit</button>
     </div>
   `;
   wireEditor($("edit-description"));
+  bindDependencyPicker((d.dependencies || []).length > 0);
   $("save-edit").onclick = async (event) => {
     event.preventDefault();
     try {
@@ -358,11 +449,13 @@ function openEditDope(d) {
         body: JSON.stringify({
           title: $("edit-title").value,
           description_html: sanitizeHtml($("edit-description").innerHTML),
+          dependency_ids: selectedDependencyIds(),
         }),
       });
       state.dopes = state.dopes.map((item) => item.id === updated.id ? updated : item);
+      state.allDopes = state.allDopes.map((item) => item.id === updated.id ? updated : item);
       toast("Edit saved");
-      openDope(updated.id);
+      await openDope(updated.id);
     } catch (err) { toast(err.message); }
   };
 }
