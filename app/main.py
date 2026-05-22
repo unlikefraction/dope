@@ -242,22 +242,20 @@ def index() -> FileResponse:
 
 
 @app.post("/api/auth/signup")
-def signup(data: AuthIn, response: Response) -> dict[str, Any]:
+def signup(data: AuthIn) -> dict[str, Any]:
     username = data.username.strip()
     display_name = (data.display_name or "").strip()
     if not display_name:
         raise HTTPException(status_code=400, detail="Display name is required")
     with db() as conn:
         try:
-            cur = conn.execute(
+            conn.execute(
                 "INSERT INTO users (username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)",
                 (username, hash_password(data.password), display_name, now_iso()),
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Username already exists") from None
-        user_id = cur.lastrowid
-    set_session(response, int(user_id))
-    return {"ok": True}
+    return {"ok": True, "username": username}
 
 
 @app.post("/api/auth/login")

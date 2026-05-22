@@ -43,6 +43,7 @@ a { color: inherit; }
 .auth-panel h1 { margin: 0 0 10px; font-size: clamp(44px, 10vw, 72px); line-height: 0.95; letter-spacing: -0.04em; }
 .auth-panel .muted { margin: 0 0 24px; }
 .auth-panel .link-button { width: 100%; margin-top: 12px; }
+.auth-notice { margin: 0 0 16px; border: 1px solid rgba(90, 154, 107, 0.35); background: rgba(90, 154, 107, 0.1); color: var(--green); padding: 10px 12px; font-weight: 800; line-height: 1.4; }
 
 .site-head { height: var(--nav-h); padding: 0 var(--page-pad); display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 20px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: rgba(237,232,224,0.92); backdrop-filter: blur(14px); z-index: 10; }
 .site-logo { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 900; letter-spacing: -0.02em; }

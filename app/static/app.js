@@ -86,10 +86,15 @@ async function init() {
   updateAuthMode();
   try {
     state.user = await api("/api/me");
-    showApp();
-    await loadRoute();
   } catch {
     showAuth();
+    return;
+  }
+  showApp();
+  try {
+    await loadRoute();
+  } catch (err) {
+    toast(err.message || "Could not load dopes");
   }
 }
 
@@ -287,9 +292,22 @@ $("auth-form").onsubmit = async (event) => {
       method: "POST",
       body: JSON.stringify({ username: $("auth-username").value, password: $("auth-password").value, display_name: $("auth-display").value }),
     });
+    if (state.authMode === "signup") {
+      state.authMode = "login";
+      $("auth-notice").textContent = "Account created. Sign in to continue.";
+      $("auth-notice").hidden = false;
+      updateAuthMode();
+      $("auth-display").value = "";
+      $("auth-password").focus();
+      return;
+    }
     state.user = await api("/api/me");
     showApp();
-    await loadRoute();
+    try {
+      await loadRoute();
+    } catch (err) {
+      toast(err.message || "Could not load dopes");
+    }
   } catch (err) { toast(err.message); }
 };
 $("logout").onclick = async () => { await api("/api/auth/logout", { method: "POST" }); state.user = null; showAuth(); };
