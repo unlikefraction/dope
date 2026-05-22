@@ -9,13 +9,18 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 function minutesFromText(value) {
-  const text = String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+  const text = String(value || "").trim().toLowerCase();
   if (!text) return null;
-  const match = text.match(/^(\d+(?:\.\d+)?)(h|hr|hrs|hour|hours|m|min|mins|minute|minutes)?$/);
-  if (!match) return null;
-  const amount = Number(match[1]);
-  const unit = match[2] || "hr";
-  return Math.max(1, Math.round(unit.startsWith("h") ? amount * 60 : amount));
+  const tokenRe = /(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m)?/g;
+  const matches = [...text.matchAll(tokenRe)];
+  const consumed = matches.map((match) => match[0]).join("").replace(/\s+/g, "");
+  if (!matches.length || consumed !== text.replace(/\s+/g, "")) return null;
+  const minutes = matches.reduce((total, match) => {
+    const amount = Number(match[1]);
+    const unit = match[2] || "hr";
+    return total + (unit.startsWith("h") ? amount * 60 : amount);
+  }, 0);
+  return Math.max(1, Math.round(minutes));
 }
 
 function formatMinutes(minutes) {

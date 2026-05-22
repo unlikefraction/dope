@@ -174,13 +174,17 @@ class CompleteIn(BaseModel):
 
 
 def parse_time_to_minutes(value: str) -> int:
-    text = value.strip().lower().replace(" ", "")
-    match = re.fullmatch(r"(\d+(?:\.\d+)?)(h|hr|hrs|hour|hours|m|min|mins|minute|minutes)?", text)
-    if not match:
-        raise HTTPException(status_code=400, detail="Use time like 30min, 2hr, or 0.5hr")
-    amount = float(match.group(1))
-    unit = match.group(2) or "hr"
-    minutes = amount * 60 if unit.startswith("h") else amount
+    text = value.strip().lower()
+    token_re = re.compile(r"(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m)?")
+    matches = list(token_re.finditer(text))
+    consumed = "".join(match.group(0) for match in matches)
+    if not matches or re.sub(r"\s+", "", consumed) != re.sub(r"\s+", "", text):
+        raise HTTPException(status_code=400, detail="Use time like 30min, 2hr, 0.5hr, or 2hr 30min")
+    minutes = 0.0
+    for match in matches:
+        amount = float(match.group(1))
+        unit = match.group(2) or "hr"
+        minutes += amount * 60 if unit.startswith("h") else amount
     if minutes <= 0 or minutes > 60 * 24 * 365:
         raise HTTPException(status_code=400, detail="Time must be greater than zero")
     return max(1, round(minutes))
