@@ -167,9 +167,9 @@ function render() {
 function card(d) {
   const status = d.status === "completed" ? `Completed by ${escapeHtml(d.completed_by?.display_name || "someone")} on ${localDate(d.completed_at)}` :
     d.status === "archived" ? `Archived ${localDate(d.archived_at)}` :
-    d.assigned_to ? `Assigned to ${escapeHtml(d.assigned_to.display_name)}` : "Ready to self assign";
+    d.assigned_to ? `Assigned to ${escapeHtml(d.assigned_to.display_name)}` : "";
   return `<button class="dope-card" data-dope="${d.id}">
-    <span><h3>${escapeHtml(d.title)}</h3><span class="meta"><span>${status}</span></span></span>
+    <span><h3>${escapeHtml(d.title)}</h3>${status ? `<span class="meta"><span>${status}</span></span>` : ""}</span>
     <span class="pill"><i class="ph ph-clock"></i>${formatMinutes(d.time_minutes)}</span>
   </button>`;
 }
@@ -193,6 +193,7 @@ function sanitizeHtml(html) {
 }
 
 function openNewDope() {
+  $("modal-title").hidden = false;
   $("modal-title").textContent = "New Dope";
   $("modal-body").innerHTML = `
     <label>Title<input id="new-title" placeholder="Improve onboarding empty state"></label>
@@ -234,30 +235,45 @@ function wireEditor(editor) {
 function openDope(id) {
   const d = state.dopes.find((item) => item.id === id);
   if (!d) return;
+  $("modal-title").hidden = true;
   $("modal-title").textContent = d.title;
+  const versions = d.versions || [];
+  const editCount = Math.max(0, versions.length - 1);
+  const activeVersion = versions[0] || { title: d.title, description_html: d.description_html, edited_at: d.created_at, version_number: 1 };
+  const versionOptions = versions.map((v) => `<option value="${v.version_number}">v${v.version_number} - ${localDate(v.edited_at)} by ${escapeHtml(v.edited_by?.display_name || "someone")}</option>`).join("");
   const history = d.assignment_history.length ? `<h2>Assignment History</h2><ul class="history">${d.assignment_history.map((h) => `<li>${escapeHtml(h.display_name)} tried this on ${fullDate(h.assigned_at)}${h.unassigned_at ? ` and unassigned on ${fullDate(h.unassigned_at)}` : ""}</li>`).join("")}</ul>` : "";
   const links = d.commit_links.length ? `<h2>Commits</h2><ul class="links">${d.commit_links.map((l) => `<li><a href="${escapeHtml(l)}" target="_blank" rel="noreferrer">${escapeHtml(l)}</a></li>`).join("")}</ul>` : "";
-  const completeBlock = d.status === "active" ? `
-    <h2>Close Dope</h2>
-    <label>Commit links<textarea-proxy><input id="commit-links" placeholder="One or more links, comma or newline separated"></textarea-proxy></label>
-    <label>Completion description<input id="completion-description" placeholder="Optional"></label>
-  ` : "";
   $("modal-body").innerHTML = `
-    <div class="meta"><span class="pill"><i class="ph ph-clock"></i>${formatMinutes(d.time_minutes)}</span>${d.assigned_to ? `<span>Assigned to ${escapeHtml(d.assigned_to.display_name)}</span>` : ""}${d.completed_by ? `<span>Completed by ${escapeHtml(d.completed_by.display_name)} on ${localDate(d.completed_at)}</span>` : ""}</div>
-    <div class="description">${sanitizeHtml(d.description_html)}</div>
+    <div id="modal-topbar" class="modal-topbar"><strong>${escapeHtml(d.title)}</strong><button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button></div>
+    <div id="modal-title-sentinel"></div>
+    <div class="modal-headline">
+      <div>
+        <span class="pill"><i class="ph ph-clock"></i>${formatMinutes(d.time_minutes)}</span>
+        ${d.assigned_to ? `<span class="pill"><i class="ph ph-user"></i>${escapeHtml(d.assigned_to.display_name)}</span>` : ""}
+        ${d.completed_by ? `<span class="pill"><i class="ph ph-check-circle"></i>${escapeHtml(d.completed_by.display_name)} on ${localDate(d.completed_at)}</span>` : ""}
+      </div>
+      <div class="version-control">
+        ${editCount ? `<button id="version-toggle" class="version-button" value="default">${editCount} ${editCount === 1 ? "edit" : "edits"}</button>` : `<span class="version-empty">no edits</span>`}
+      </div>
+    </div>
+    ${editCount ? `<label id="version-picker-wrap" class="version-picker" hidden>Read version<select id="version-picker">${versionOptions}</select></label>` : ""}
+    <h2 id="dope-version-title">${escapeHtml(activeVersion.title)}</h2>
+    <div id="dope-version-description" class="description">${sanitizeHtml(activeVersion.description_html)}</div>
     ${d.completion_description ? `<h2>Completion Notes</h2><p class="muted">${escapeHtml(d.completion_description)}</p>` : ""}
     ${links}
     ${history}
-    ${completeBlock}
-    <div class="modal-actions">
-      ${d.status === "active" ? `<button id="assign" value="default"><i class="ph ph-user-plus"></i>Self Assign this Dope</button>` : ""}
-      ${d.status === "active" && d.assigned_to ? `<button id="unassign" class="secondary" value="default">Unassign</button>` : ""}
-      ${d.status === "active" ? `<button id="complete" class="secondary" value="default">Close with commits</button>` : ""}
-      ${d.status !== "archived" ? `<button id="archive" class="danger" value="default"><i class="ph ph-archive"></i>Archive</button>` : `<button id="restore" class="secondary" value="default">Restore</button>`}
+    <div class="modal-action-bar">
+      ${d.status !== "archived" ? `<button id="edit-dope" class="icon-action secondary" value="default" title="Edit"><i class="ph ph-pencil-simple"></i></button>` : ""}
+      ${d.status !== "archived" ? `<button id="archive" class="icon-action danger" value="default" title="Archive"><i class="ph ph-archive"></i></button>` : `<button id="restore" class="secondary" value="default"><i class="ph ph-arrow-counter-clockwise"></i>Restore</button>`}
+      ${d.status === "active" && d.assigned_to ? `<button id="unassign" class="icon-action secondary" value="default" title="Unassign"><i class="ph ph-user-minus"></i></button>` : ""}
+      ${d.status === "active" && !d.assigned_to ? `<button id="assign" class="secondary action-text" value="default"><i class="ph ph-target"></i>I'll do it</button>` : ""}
+      ${d.status === "active" ? `<button id="complete" class="${d.assigned_to ? "primary-wide" : "action-text"}" value="default"><i class="ph ph-confetti"></i>Doped</button>` : ""}
     </div>
   `;
   bindDopeActions(d);
+  bindVersionControls(d);
   $("dope-dialog").showModal();
+  bindModalChrome(d.title);
 }
 
 function bindDopeActions(d) {
@@ -266,19 +282,14 @@ function bindDopeActions(d) {
     await loadRoute();
     toast(message);
   };
+  const edit = $("edit-dope");
+  if (edit) edit.onclick = (event) => { event.preventDefault(); openEditDope(d); };
   const assign = $("assign");
   if (assign) assign.onclick = async (event) => { event.preventDefault(); await api(`/api/dopes/${d.id}/assign`, { method: "POST" }); await closeReload("Dope assigned"); };
   const unassign = $("unassign");
   if (unassign) unassign.onclick = async (event) => { event.preventDefault(); await api(`/api/dopes/${d.id}/unassign`, { method: "POST" }); await closeReload("Dope unassigned"); };
   const complete = $("complete");
-  if (complete) complete.onclick = async (event) => {
-    event.preventDefault();
-    const links = $("commit-links").value.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
-    try {
-      await api(`/api/dopes/${d.id}/complete`, { method: "POST", body: JSON.stringify({ commit_links: links, completion_description: $("completion-description").value }) });
-      await closeReload("Dope completed");
-    } catch (err) { toast(err.message); }
-  };
+  if (complete) complete.onclick = (event) => { event.preventDefault(); openCompleteDope(d); };
   const archive = $("archive");
   if (archive) archive.onclick = async (event) => {
     event.preventDefault();
@@ -290,6 +301,87 @@ function bindDopeActions(d) {
   };
   const restore = $("restore");
   if (restore) restore.onclick = async (event) => { event.preventDefault(); await api(`/api/dopes/${d.id}/restore`, { method: "POST" }); await closeReload("Dope restored"); };
+}
+
+function bindVersionControls(d) {
+  const toggle = $("version-toggle");
+  const wrap = $("version-picker-wrap");
+  const picker = $("version-picker");
+  if (!toggle || !wrap || !picker) return;
+  toggle.onclick = (event) => {
+    event.preventDefault();
+    wrap.hidden = !wrap.hidden;
+  };
+  picker.onchange = () => {
+    const version = (d.versions || []).find((v) => String(v.version_number) === picker.value);
+    if (!version) return;
+    $("dope-version-title").textContent = version.title;
+    $("dope-version-description").innerHTML = sanitizeHtml(version.description_html);
+  };
+}
+
+function bindModalChrome(title) {
+  const modal = document.querySelector("#dope-dialog .modal");
+  const topbar = $("modal-topbar");
+  if (!modal || !topbar) return;
+  topbar.classList.remove("is-visible");
+  topbar.querySelector("strong").textContent = title;
+  modal.onscroll = () => {
+    topbar.classList.toggle("is-visible", modal.scrollTop > 90);
+  };
+}
+
+function openEditDope(d) {
+  $("modal-title").hidden = true;
+  $("modal-title").textContent = "Edit Dope";
+  $("modal-body").innerHTML = `
+    <div class="modal-topbar is-visible"><strong>Edit Dope</strong><button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button></div>
+    <label>Title<input id="edit-title" value="${escapeHtml(d.title)}"></label>
+    <label>Description<div id="edit-description" class="editor" contenteditable="true" data-placeholder="Write details. Paste images directly here.">${sanitizeHtml(d.description_html)}</div></label>
+    <div class="modal-action-bar">
+      <button id="save-edit" class="primary-wide" value="default"><i class="ph ph-floppy-disk"></i>Save edit</button>
+    </div>
+  `;
+  wireEditor($("edit-description"));
+  $("save-edit").onclick = async (event) => {
+    event.preventDefault();
+    try {
+      const updated = await api(`/api/dopes/${d.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          title: $("edit-title").value,
+          description_html: sanitizeHtml($("edit-description").innerHTML),
+        }),
+      });
+      state.dopes = state.dopes.map((item) => item.id === updated.id ? updated : item);
+      toast("Edit saved");
+      openDope(updated.id);
+    } catch (err) { toast(err.message); }
+  };
+}
+
+function openCompleteDope(d) {
+  $("modal-title").hidden = true;
+  $("modal-title").textContent = "Doped";
+  $("modal-body").innerHTML = `
+    <div class="modal-topbar is-visible"><strong>Doped</strong><button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button></div>
+    <h2>${escapeHtml(d.title)}</h2>
+    <label>Commit links<textarea id="commit-links" rows="5" placeholder="One or more links, comma or newline separated"></textarea></label>
+    <label>Completion description<textarea id="completion-description" rows="4" placeholder="Optional"></textarea></label>
+    <div class="modal-action-bar">
+      <button id="confirm-complete" class="primary-wide" value="default"><i class="ph ph-confetti"></i>Doped</button>
+    </div>
+  `;
+  $("confirm-complete").onclick = async (event) => {
+    event.preventDefault();
+    const links = $("commit-links").value.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
+    try {
+      await api(`/api/dopes/${d.id}/complete`, { method: "POST", body: JSON.stringify({ commit_links: links, completion_description: $("completion-description").value }) });
+      $("dope-dialog").close();
+      await loadRoute();
+      toast("Dope completed");
+    } catch (err) { toast(err.message); }
+  };
 }
 
 $("auth-toggle").onclick = () => { state.authMode = state.authMode === "login" ? "signup" : "login"; updateAuthMode(); };

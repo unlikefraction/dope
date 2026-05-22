@@ -85,6 +85,27 @@ def init_db() -> None:
               url TEXT NOT NULL,
               created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS dope_versions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              dope_id INTEGER NOT NULL REFERENCES dopes(id) ON DELETE CASCADE,
+              version_number INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              description_html TEXT NOT NULL,
+              edited_by INTEGER NOT NULL REFERENCES users(id),
+              edited_at TEXT NOT NULL,
+              UNIQUE(dope_id, version_number)
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO dope_versions (dope_id, version_number, title, description_html, edited_by, edited_at)
+            SELECT d.id, 1, d.title, d.description_html, d.created_by, d.created_at
+            FROM dopes d
+            WHERE NOT EXISTS (
+              SELECT 1 FROM dope_versions v WHERE v.dope_id = d.id
+            )
             """
         )
 
@@ -168,6 +189,11 @@ class DopeIn(BaseModel):
     time_text: str = Field(min_length=1, max_length=40)
 
 
+class DopeEditIn(BaseModel):
+    title: str = Field(min_length=1, max_length=180)
+    description_html: str = Field(min_length=1, max_length=250_000)
+
+
 class CompleteIn(BaseModel):
     commit_links: list[str] = Field(min_length=1, max_length=20)
     completion_description: str = Field(default="", max_length=20_000)
@@ -204,6 +230,27 @@ def user_public(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return {"id": row["id"], "username": row["username"], "display_name": row["display_name"]}
 
 
+def add_dope_version(
+    conn: sqlite3.Connection,
+    dope_id: int,
+    title: str,
+    description_html: str,
+    edited_by: int,
+    edited_at: str | None = None,
+) -> None:
+    current = conn.execute(
+        "SELECT COALESCE(MAX(version_number), 0) FROM dope_versions WHERE dope_id = ?",
+        (dope_id,),
+    ).fetchone()[0]
+    conn.execute(
+        """
+        INSERT INTO dope_versions (dope_id, version_number, title, description_html, edited_by, edited_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (dope_id, int(current) + 1, title, description_html, edited_by, edited_at or now_iso()),
+    )
+
+
 def dope_payload(row: sqlite3.Row, conn: sqlite3.Connection) -> dict[str, Any]:
     users = {
         u["id"]: u
@@ -220,6 +267,17 @@ def dope_payload(row: sqlite3.Row, conn: sqlite3.Connection) -> dict[str, Any]:
         (row["id"],),
     ).fetchall()
     links = conn.execute("SELECT url FROM commit_links WHERE dope_id = ? ORDER BY id", (row["id"],)).fetchall()
+    versions = conn.execute(
+        """
+        SELECT v.id, v.version_number, v.title, v.description_html, v.edited_by, v.edited_at,
+               u.username AS editor_username, u.display_name AS editor_display_name
+        FROM dope_versions v
+        JOIN users u ON u.id = v.edited_by
+        WHERE v.dope_id = ?
+        ORDER BY v.version_number DESC
+        """,
+        (row["id"],),
+    ).fetchall()
     return {
         "id": row["id"],
         "title": row["title"],
@@ -237,6 +295,21 @@ def dope_payload(row: sqlite3.Row, conn: sqlite3.Connection) -> dict[str, Any]:
         "archived_by": user_public(users.get(row["archived_by"])),
         "assignment_history": [dict(h) for h in history],
         "commit_links": [l["url"] for l in links],
+        "versions": [
+            {
+                "id": v["id"],
+                "version_number": v["version_number"],
+                "title": v["title"],
+                "description_html": v["description_html"],
+                "edited_at": v["edited_at"],
+                "edited_by": {
+                    "id": v["edited_by"],
+                    "username": v["editor_username"],
+                    "display_name": v["editor_display_name"],
+                },
+            }
+            for v in versions
+        ],
     }
 
 
@@ -312,8 +385,27 @@ def create_dope(data: DopeIn, user_cookie: str | None = Cookie(default=None, ali
             """,
             (data.title.strip(), data.description_html, minutes, user["id"], now_iso()),
         )
+        add_dope_version(conn, int(cur.lastrowid), data.title.strip(), data.description_html, user["id"], now_iso())
         row = conn.execute("SELECT * FROM dopes WHERE id = ?", (cur.lastrowid,)).fetchone()
         return dope_payload(row, conn)
+
+
+@app.put("/api/dopes/{dope_id}")
+def edit_dope(dope_id: int, data: DopeEditIn, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
+    user = current_user(user_cookie)
+    title = data.title.strip()
+    edited_at = now_iso()
+    with db() as conn:
+        row = conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone()
+        if not row or row["archived_at"]:
+            raise HTTPException(status_code=404, detail="Editable dope not found")
+        if row["title"] != title or row["description_html"] != data.description_html:
+            conn.execute(
+                "UPDATE dopes SET title = ?, description_html = ? WHERE id = ?",
+                (title, data.description_html, dope_id),
+            )
+            add_dope_version(conn, dope_id, title, data.description_html, user["id"], edited_at)
+        return dope_payload(conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone(), conn)
 
 
 @app.post("/api/dopes/{dope_id}/assign")
