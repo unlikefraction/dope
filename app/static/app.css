@@ -125,6 +125,7 @@ dialog::backdrop { background: rgba(26,26,26,0.42); backdrop-filter: blur(4px); 
 .dependency-summary i { transition: transform var(--transition); }
 .dependency-summary.is-open i { transform: rotate(180deg); }
 .dependency-links { display: grid; gap: 8px; margin: 8px 0 0; }
+.dependency-links[hidden] { display: none; }
 .dependency-link { width: 100%; min-height: 46px; display: grid; grid-template-columns: 1fr auto; text-align: left; background: var(--bg-3); color: var(--fg); border-color: var(--border); }
 .dependency-link.is-undoped { border-color: var(--fg); background: var(--bg); }
 .dependency-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
