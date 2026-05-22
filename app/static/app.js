@@ -193,13 +193,16 @@ function sanitizeHtml(html) {
 }
 
 function openNewDope() {
-  $("modal-title").hidden = false;
+  $("modal-title").hidden = true;
   $("modal-title").textContent = "New Dope";
   $("modal-body").innerHTML = `
-    <label>Title<input id="new-title" placeholder="Improve onboarding empty state"></label>
-    <label>Description<div id="new-description" class="editor" contenteditable="true" data-placeholder="Write details. Paste images directly here."></div></label>
-    <label>Time to complete<input id="new-time" placeholder="2hr, 30min, 0.5hr"></label>
-    <div class="modal-actions"><button id="create-dope" value="default">Create Dope</button></div>
+    <div class="modal-topbar is-visible"><strong>New Dope</strong><button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button></div>
+    <div class="modal-content">
+      <label>Title<input id="new-title" placeholder="Improve onboarding empty state"></label>
+      <label>Description<div id="new-description" class="editor" contenteditable="true" data-placeholder="Write details. Paste images directly here."></div></label>
+      <label>Time to complete<input id="new-time" placeholder="2hr, 30min, 0.5hr"></label>
+    </div>
+    <div class="modal-action-bar"><button id="create-dope" class="primary-wide" value="default">Create Dope</button></div>
   `;
   wireEditor($("new-description"));
   $("create-dope").onclick = async (event) => {
@@ -245,29 +248,31 @@ function openDope(id) {
   const links = d.commit_links.length ? `<h2>Commits</h2><ul class="links">${d.commit_links.map((l) => `<li><a href="${escapeHtml(l)}" target="_blank" rel="noreferrer">${escapeHtml(l)}</a></li>`).join("")}</ul>` : "";
   $("modal-body").innerHTML = `
     <div id="modal-topbar" class="modal-topbar"><strong>${escapeHtml(d.title)}</strong><button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button></div>
-    <div id="modal-title-sentinel"></div>
-    <div class="modal-headline">
-      <div>
-        <span class="pill"><i class="ph ph-clock"></i>${formatMinutes(d.time_minutes)}</span>
-        ${d.assigned_to ? `<span class="pill"><i class="ph ph-user"></i>${escapeHtml(d.assigned_to.display_name)}</span>` : ""}
-        ${d.completed_by ? `<span class="pill"><i class="ph ph-check-circle"></i>${escapeHtml(d.completed_by.display_name)} on ${localDate(d.completed_at)}</span>` : ""}
+    <div class="modal-content">
+      <div id="modal-title-sentinel"></div>
+      <div class="modal-headline">
+        <div>
+          <span class="pill"><i class="ph ph-clock"></i>${formatMinutes(d.time_minutes)}</span>
+          ${d.assigned_to ? `<span class="pill"><i class="ph ph-user"></i>${escapeHtml(d.assigned_to.display_name)}</span>` : ""}
+          ${d.completed_by ? `<span class="pill"><i class="ph ph-check-circle"></i>${escapeHtml(d.completed_by.display_name)} on ${localDate(d.completed_at)}</span>` : ""}
+        </div>
+        <div class="version-control">
+          ${editCount ? `<button id="version-toggle" class="version-button" value="default">${editCount} ${editCount === 1 ? "edit" : "edits"}</button>` : `<span class="version-empty">no edits</span>`}
+        </div>
       </div>
-      <div class="version-control">
-        ${editCount ? `<button id="version-toggle" class="version-button" value="default">${editCount} ${editCount === 1 ? "edit" : "edits"}</button>` : `<span class="version-empty">no edits</span>`}
-      </div>
+      ${editCount ? `<label id="version-picker-wrap" class="version-picker" hidden>Read version<select id="version-picker">${versionOptions}</select></label>` : ""}
+      <h2 id="dope-version-title">${escapeHtml(activeVersion.title)}</h2>
+      <div id="dope-version-description" class="description">${sanitizeHtml(activeVersion.description_html)}</div>
+      ${d.completion_description ? `<h2>Completion Notes</h2><p class="muted">${escapeHtml(d.completion_description)}</p>` : ""}
+      ${links}
+      ${history}
     </div>
-    ${editCount ? `<label id="version-picker-wrap" class="version-picker" hidden>Read version<select id="version-picker">${versionOptions}</select></label>` : ""}
-    <h2 id="dope-version-title">${escapeHtml(activeVersion.title)}</h2>
-    <div id="dope-version-description" class="description">${sanitizeHtml(activeVersion.description_html)}</div>
-    ${d.completion_description ? `<h2>Completion Notes</h2><p class="muted">${escapeHtml(d.completion_description)}</p>` : ""}
-    ${links}
-    ${history}
     <div class="modal-action-bar">
       ${d.status !== "archived" ? `<button id="edit-dope" class="icon-action secondary" value="default" title="Edit"><i class="ph ph-pencil-simple"></i></button>` : ""}
       ${d.status !== "archived" ? `<button id="archive" class="icon-action danger" value="default" title="Archive"><i class="ph ph-archive"></i></button>` : `<button id="restore" class="secondary" value="default"><i class="ph ph-arrow-counter-clockwise"></i>Restore</button>`}
-      ${d.status === "active" && d.assigned_to ? `<button id="unassign" class="icon-action secondary" value="default" title="Unassign"><i class="ph ph-user-minus"></i></button>` : ""}
-      ${d.status === "active" && !d.assigned_to ? `<button id="assign" class="secondary action-text" value="default"><i class="ph ph-target"></i>I'll do it</button>` : ""}
-      ${d.status === "active" ? `<button id="complete" class="${d.assigned_to ? "primary-wide" : "action-text"}" value="default"><i class="ph ph-confetti"></i>Doped</button>` : ""}
+      ${d.status === "active" && d.assigned_to ? `<button id="unassign" class="non-cta" value="default"><i class="ph ph-user-minus"></i>Unassign Dope</button>` : ""}
+      ${d.status === "active" && !d.assigned_to ? `<button id="assign" class="primary-wide" value="default"><i class="ph ph-target"></i>I'll take it</button>` : ""}
+      ${d.status === "active" ? `<button id="complete" class="${d.assigned_to ? "primary-wide" : "secondary action-text"}" value="default"><i class="ph ph-confetti"></i>Doped</button>` : ""}
     </div>
   `;
   bindDopeActions(d);
@@ -336,8 +341,10 @@ function openEditDope(d) {
   $("modal-title").textContent = "Edit Dope";
   $("modal-body").innerHTML = `
     <div class="modal-topbar is-visible"><strong>Edit Dope</strong><button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button></div>
-    <label>Title<input id="edit-title" value="${escapeHtml(d.title)}"></label>
-    <label>Description<div id="edit-description" class="editor" contenteditable="true" data-placeholder="Write details. Paste images directly here.">${sanitizeHtml(d.description_html)}</div></label>
+    <div class="modal-content">
+      <label>Title<input id="edit-title" value="${escapeHtml(d.title)}"></label>
+      <label>Description<div id="edit-description" class="editor" contenteditable="true" data-placeholder="Write details. Paste images directly here.">${sanitizeHtml(d.description_html)}</div></label>
+    </div>
     <div class="modal-action-bar">
       <button id="save-edit" class="primary-wide" value="default"><i class="ph ph-floppy-disk"></i>Save edit</button>
     </div>
@@ -365,9 +372,11 @@ function openCompleteDope(d) {
   $("modal-title").textContent = "Doped";
   $("modal-body").innerHTML = `
     <div class="modal-topbar is-visible"><strong>Doped</strong><button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button></div>
-    <h2>${escapeHtml(d.title)}</h2>
-    <label>Commit links<textarea id="commit-links" rows="5" placeholder="One or more links, comma or newline separated"></textarea></label>
-    <label>Completion description<textarea id="completion-description" rows="4" placeholder="Optional"></textarea></label>
+    <div class="modal-content">
+      <h2>${escapeHtml(d.title)}</h2>
+      <label>Commit links<textarea id="commit-links" rows="5" placeholder="One or more links, comma or newline separated"></textarea></label>
+      <label>Completion description<textarea id="completion-description" rows="4" placeholder="Optional"></textarea></label>
+    </div>
     <div class="modal-action-bar">
       <button id="confirm-complete" class="primary-wide" value="default"><i class="ph ph-confetti"></i>Doped</button>
     </div>
