@@ -216,7 +216,7 @@ function render() {
 function card(d) {
   const status = d.status === "completed" ? `Completed by ${escapeHtml(d.completed_by?.display_name || "someone")} on ${localDate(d.completed_at)}` :
     d.status === "archived" ? `Archived ${localDate(d.archived_at)}` :
-    d.assigned_to ? `Assigned to ${escapeHtml(d.assigned_to.display_name)}` : "";
+    d.assigned_to ? `Claimed by ${escapeHtml(d.assigned_to.display_name)}` : "";
   return `<button class="dope-card" data-dope="${d.id}">
     <span><h3>${escapeHtml(d.title)}</h3>${status ? `<span class="meta"><span>${status}</span></span>` : ""}</span>
     <span class="card-pills">
