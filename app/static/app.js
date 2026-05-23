@@ -3,6 +3,8 @@ const state = {
   route: "active",
   dopes: [],
   allDopes: [],
+  progress: [],
+  progressDays: 7,
   filters: { min: "", max: "", depsDoped: false, completedBy: "", from: "", to: "" },
   authMode: "login",
 };
@@ -139,13 +141,24 @@ async function init() {
 async function loadRoute() {
   state.route = location.hash.replace("#", "") || "active";
   if (!["active", "completed", "archived"].includes(state.route)) state.route = "active";
+  const isActive = state.route === "active";
   document.querySelectorAll(".nav-links a").forEach((a) => a.classList.toggle("active", a.dataset.route === state.route));
-  $("page-title").textContent = state.route === "active" ? "Dopes" : state.route === "completed" ? "Completed Dopes" : "Archived Dopes";
+  $("page-title").textContent = isActive ? "Active Dopes" : state.route === "completed" ? "Completed Dopes" : "Archived Dopes";
+  $("page-title").classList.toggle("compact-title", isActive);
   $("page-subtitle").textContent = state.route === "active" ? "Product work waiting to be amended." : state.route === "completed" ? "Work closed with commit links." : "Dopes moved out of the main queue.";
-  $("new-dope").style.display = state.route === "active" ? "inline-flex" : "none";
-  $("active-assigned-wrap").style.display = state.route === "active" ? "block" : "none";
+  $("page-subtitle").hidden = isActive;
+  $("progress-panel").hidden = !isActive;
+  $("new-dope").style.display = isActive ? "inline-flex" : "none";
+  $("active-assigned-wrap").style.display = isActive ? "block" : "none";
   $("completed-filters").style.display = state.route === "completed" ? "block" : "none";
-  state.dopes = await api(`/api/dopes?status=${state.route}`);
+  if (isActive) {
+    [state.dopes, state.progress] = await Promise.all([
+      api(`/api/dopes?status=${state.route}`),
+      api(`/api/stats/progress?days=${state.progressDays}`),
+    ]);
+  } else {
+    state.dopes = await api(`/api/dopes?status=${state.route}`);
+  }
   state.allDopes = [];
   render();
 }
@@ -205,6 +218,7 @@ function renderFilterButton() {
 
 function render() {
   renderFilterButton();
+  renderProgressChart();
   const items = filteredDopes();
   const assigned = items.filter((d) => d.status === "active" && d.assigned_to);
   $("active-assigned").innerHTML = assigned.length ? assigned.map(card).join("") : `<p class="empty">No one is working on a dope right now.</p>`;
@@ -214,6 +228,65 @@ function render() {
   document.querySelectorAll("[data-dope]").forEach((el) => {
     el.onclick = () => openDope(Number(el.dataset.dope));
   });
+}
+
+function progressColor(userId) {
+  const colors = ["#1a1a1a", "#5a5a5a", "#8b8b8b", "#2e6f8e", "#5a9a6b", "#7a4d8e", "#9a4d42"];
+  return colors[Math.abs(Number(userId) || 0) % colors.length];
+}
+
+function dopeCountLabel(count) {
+  return `${count} ${count === 1 ? "dope" : "dopes"}`;
+}
+
+function renderProgressChart() {
+  const panel = $("progress-panel");
+  if (!panel || state.route !== "active") return;
+  document.querySelectorAll("[data-progress-days]").forEach((button) => {
+    button.classList.toggle("active", Number(button.dataset.progressDays) === state.progressDays);
+  });
+  const chart = $("progress-chart");
+  const maxMinutes = Math.max(60, ...state.progress.map((day) => day.total_minutes || 0));
+  chart.innerHTML = state.progress.map((day) => {
+    const total = day.total_minutes || 0;
+    const stacks = day.stacks.length ? day.stacks.map((stack) => {
+      const width = Math.max(2, (stack.minutes / maxMinutes) * 100);
+      const tip = `${stack.display_name}\n${formatMinutes(stack.minutes)}\n${dopeCountLabel(stack.count)}`;
+      return `<span class="progress-stack" style="width:${width}%;background:${progressColor(stack.user_id)}" data-progress-tip="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}"></span>`;
+    }).join("") : `<span class="progress-empty"></span>`;
+    return `
+      <div class="progress-row">
+        <span class="progress-date">${escapeHtml(day.label)}</span>
+        <div class="progress-track">${stacks}</div>
+        <span class="progress-total">${total ? formatMinutes(total) : "0"}</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function showProgressTooltip(event) {
+  const target = event.target.closest("[data-progress-tip]");
+  const tip = $("progress-tooltip");
+  if (!target || !tip) return;
+  tip.textContent = target.dataset.progressTip;
+  tip.hidden = false;
+  moveProgressTooltip(event);
+}
+
+function moveProgressTooltip(event) {
+  const tip = $("progress-tooltip");
+  if (!tip || tip.hidden) return;
+  const offset = 14;
+  const rect = tip.getBoundingClientRect();
+  const left = Math.min(window.innerWidth - rect.width - 10, event.clientX + offset);
+  const top = Math.min(window.innerHeight - rect.height - 10, event.clientY + offset);
+  tip.style.left = `${Math.max(10, left)}px`;
+  tip.style.top = `${Math.max(10, top)}px`;
+}
+
+function hideProgressTooltip() {
+  const tip = $("progress-tooltip");
+  if (tip) tip.hidden = true;
 }
 
 function card(d) {
@@ -662,5 +735,20 @@ $("filter-reset").onclick = (event) => {
   $("filter-dialog").close();
   render();
 };
+document.querySelectorAll("[data-progress-days]").forEach((button) => {
+  button.onclick = async () => {
+    state.progressDays = Number(button.dataset.progressDays);
+    if (state.route !== "active") return;
+    try {
+      state.progress = await api(`/api/stats/progress?days=${state.progressDays}`);
+      renderProgressChart();
+    } catch (err) { toast(err.message); }
+  };
+});
+$("progress-chart").addEventListener("pointerover", showProgressTooltip);
+$("progress-chart").addEventListener("pointermove", moveProgressTooltip);
+$("progress-chart").addEventListener("pointerout", (event) => {
+  if (!event.relatedTarget || !event.relatedTarget.closest?.("[data-progress-tip]")) hideProgressTooltip();
+});
 window.addEventListener("hashchange", loadRoute);
 init();

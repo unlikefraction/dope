@@ -9,7 +9,7 @@ import re
 import secrets
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,8 @@ SECRET_KEY = os.environ.get("DOPE_SECRET_KEY", "dev-only-change-me")
 COOKIE_SECURE = os.environ.get("DOPE_COOKIE_SECURE", "false").lower() in {"1", "true", "yes"}
 COOKIE_NAME = "dope_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 30
+IST_OFFSET = timedelta(hours=5, minutes=30)
+DOPE_DAY_RESET = datetime_time(hour=9)
 
 app = FastAPI(title="Dope")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
@@ -32,6 +34,26 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def parse_iso_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def dope_day_for(value: str | datetime) -> date:
+    parsed = parse_iso_datetime(value) if isinstance(value, str) else value.astimezone(timezone.utc)
+    local = parsed + IST_OFFSET
+    day = local.date()
+    if local.time() < DOPE_DAY_RESET:
+        day -= timedelta(days=1)
+    return day
+
+
+def current_dope_day() -> date:
+    return dope_day_for(datetime.now(timezone.utc))
 
 
 def db() -> sqlite3.Connection:
@@ -575,6 +597,57 @@ def list_dopes(status: str = "active", user_cookie: str | None = Cookie(default=
     with db() as conn:
         rows = conn.execute(f"SELECT * FROM dopes WHERE {where} ORDER BY {order}").fetchall()
         return [dope_payload(row, conn) for row in rows]
+
+
+@app.get("/api/stats/progress")
+def progress_stats(days: int = 7, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> list[dict[str, Any]]:
+    current_user(user_cookie)
+    if days not in {7, 14, 30}:
+        raise HTTPException(status_code=400, detail="Progress range must be 7, 14, or 30 days")
+
+    today = current_dope_day()
+    first_day = today - timedelta(days=days - 1)
+    start_utc = datetime.combine(first_day, DOPE_DAY_RESET, tzinfo=timezone.utc) - IST_OFFSET
+    buckets: dict[date, dict[int, dict[str, Any]]] = {first_day + timedelta(days=i): {} for i in range(days)}
+
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT d.time_minutes, d.completed_at, u.id AS user_id, u.display_name
+            FROM dopes d
+            JOIN users u ON u.id = d.completed_by
+            WHERE d.archived_at IS NULL
+              AND d.completed_at IS NOT NULL
+              AND d.completed_at >= ?
+            ORDER BY d.completed_at ASC
+            """,
+            (start_utc.isoformat(timespec="seconds"),),
+        ).fetchall()
+
+    for row in rows:
+        day = dope_day_for(row["completed_at"])
+        if day not in buckets:
+            continue
+        stack = buckets[day].setdefault(
+            row["user_id"],
+            {"user_id": row["user_id"], "display_name": row["display_name"], "minutes": 0, "count": 0},
+        )
+        stack["minutes"] += int(row["time_minutes"])
+        stack["count"] += 1
+
+    payload = []
+    for day in sorted(buckets):
+        stacks = sorted(buckets[day].values(), key=lambda item: (-item["minutes"], item["display_name"].lower()))
+        total_minutes = sum(item["minutes"] for item in stacks)
+        payload.append(
+            {
+                "date": day.isoformat(),
+                "label": day.strftime("%b %-d") if os.name != "nt" else day.strftime("%b %#d"),
+                "total_minutes": total_minutes,
+                "stacks": stacks,
+            }
+        )
+    return payload
 
 
 @app.post("/api/dopes")
