@@ -220,7 +220,8 @@ function card(d) {
   const status = d.status === "completed" ? `Completed by ${escapeHtml(d.completed_by?.display_name || "someone")} on ${localDate(d.completed_at)}` :
     d.status === "archived" ? `Archived ${localDate(d.archived_at)}` :
     d.assigned_to ? `Claimed by ${escapeHtml(d.assigned_to.display_name)}` : "";
-  return `<button class="dope-card" data-dope="${d.id}">
+  const blocked = d.status === "active" && (d.blocked_dependencies || []).length > 0;
+  return `<button class="dope-card ${blocked ? "is-blocked" : ""}" data-dope="${d.id}">
     <span><h3>${escapeHtml(d.title)}</h3>${status ? `<span class="meta"><span>${status}</span></span>` : ""}</span>
     <span class="card-pills">
       ${d.dependent_count ? `<span class="pill"><i class="ph ph-tree-structure"></i>${d.dependent_count} ${d.dependent_count === 1 ? "dependent" : "dependents"}</span>` : ""}
