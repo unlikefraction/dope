@@ -55,6 +55,9 @@ async function api(path, options = {}) {
 
 function toast(message, undo) {
   const el = $("toast");
+  const openModal = document.querySelector("dialog[open] .modal");
+  const toastHost = openModal || document.body;
+  if (el.parentElement !== toastHost) toastHost.appendChild(el);
   el.innerHTML = "";
   el.append(document.createTextNode(message));
   if (undo) {
