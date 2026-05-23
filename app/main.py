@@ -76,7 +76,8 @@ def init_db() -> None:
               user_id INTEGER NOT NULL REFERENCES users(id),
               display_name TEXT NOT NULL,
               assigned_at TEXT NOT NULL,
-              unassigned_at TEXT
+              unassigned_at TEXT,
+              unassign_reason TEXT
             );
 
             CREATE TABLE IF NOT EXISTS commit_links (
@@ -116,6 +117,12 @@ def init_db() -> None:
             )
             """
         )
+        assignment_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(assignment_history)").fetchall()
+        }
+        if "unassign_reason" not in assignment_columns:
+            conn.execute("ALTER TABLE assignment_history ADD COLUMN unassign_reason TEXT")
 
 
 @app.on_event("startup")
@@ -202,6 +209,10 @@ class DopeEditIn(BaseModel):
     title: str = Field(min_length=1, max_length=180)
     description_html: str = Field(min_length=1, max_length=250_000)
     dependency_ids: list[int] = Field(default_factory=list, max_length=50)
+
+
+class UnassignIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class CompleteIn(BaseModel):
@@ -626,9 +637,12 @@ def assign_dope(dope_id: int, user_cookie: str | None = Cookie(default=None, ali
 
 
 @app.post("/api/dopes/{dope_id}/unassign")
-def unassign_dope(dope_id: int, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
+def unassign_dope(dope_id: int, data: UnassignIn, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
     current_user(user_cookie)
     unassigned_at = now_iso()
+    reason = data.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Reason is required")
     with db() as conn:
         row = conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone()
         if not row or not row["assigned_to"] or row["archived_at"] or row["completed_at"]:
@@ -636,14 +650,14 @@ def unassign_dope(dope_id: int, user_cookie: str | None = Cookie(default=None, a
         conn.execute("UPDATE dopes SET assigned_to = NULL, assigned_at = NULL WHERE id = ?", (dope_id,))
         conn.execute(
             """
-            UPDATE assignment_history SET unassigned_at = ?
+            UPDATE assignment_history SET unassigned_at = ?, unassign_reason = ?
             WHERE id = (
               SELECT id FROM assignment_history
               WHERE dope_id = ? AND unassigned_at IS NULL
               ORDER BY id DESC LIMIT 1
             )
             """,
-            (unassigned_at, dope_id),
+            (unassigned_at, reason, dope_id),
         )
         return dope_payload(conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone(), conn)
 

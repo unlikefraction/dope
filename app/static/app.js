@@ -255,7 +255,8 @@ function linkifyText(value) {
 function assignmentHistoryLine(d, h) {
   const endedByCompletion = d.status === "completed" && h.unassigned_at === d.completed_at;
   const endLabel = endedByCompletion ? "completed" : "unassigned";
-  return `${escapeHtml(h.display_name)} started this on ${fullDate(h.assigned_at)}${h.unassigned_at ? ` and ${endLabel} on ${fullDate(h.unassigned_at)}` : ""}`;
+  const reason = !endedByCompletion && h.unassign_reason ? ` because, and i quote "${escapeHtml(h.unassign_reason)}"` : "";
+  return `${escapeHtml(h.display_name)} started this on ${fullDate(h.assigned_at)}${h.unassigned_at ? ` and ${endLabel} on ${fullDate(h.unassigned_at)}${reason}` : ""}`;
 }
 
 function dependencyPickerHtml(selectedIds = [], excludeId = null) {
@@ -466,7 +467,7 @@ function bindDopeActions(d) {
   const assign = $("assign");
   if (assign) assign.onclick = async (event) => { event.preventDefault(); await api(`/api/dopes/${d.id}/assign`, { method: "POST" }); await closeReload("Dope assigned"); };
   const unassign = $("unassign");
-  if (unassign) unassign.onclick = async (event) => { event.preventDefault(); await api(`/api/dopes/${d.id}/unassign`, { method: "POST" }); await closeReload("Dope unassigned"); };
+  if (unassign) unassign.onclick = (event) => { event.preventDefault(); openUnassignDope(d); };
   const complete = $("complete");
   if (complete) complete.onclick = (event) => { event.preventDefault(); openCompleteDope(d); };
   const archive = $("archive");
@@ -480,6 +481,34 @@ function bindDopeActions(d) {
   };
   const restore = $("restore");
   if (restore) restore.onclick = async (event) => { event.preventDefault(); await api(`/api/dopes/${d.id}/restore`, { method: "POST" }); await closeReload("Dope restored"); };
+}
+
+function openUnassignDope(d) {
+  $("modal-title").hidden = true;
+  $("modal-title").textContent = "Unassign Dope";
+  $("modal-body").innerHTML = `
+    <div class="modal-topbar is-visible"><strong>Unassign Dope</strong><button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button></div>
+    <div class="modal-content">
+      <h2>${escapeHtml(d.title)}</h2>
+      <label>Reason<input id="unassign-reason" name="dope_unassign_reason" autocomplete="off" maxlength="500" required placeholder="What blocked this?"></label>
+    </div>
+    <div class="modal-action-bar">
+      <button id="confirm-unassign" class="primary-wide" value="default"><i class="ph ph-user-minus"></i>Unassign Dope</button>
+    </div>
+  `;
+  $("confirm-unassign").onclick = async (event) => {
+    event.preventDefault();
+    try {
+      await api(`/api/dopes/${d.id}/unassign`, {
+        method: "POST",
+        body: JSON.stringify({ reason: $("unassign-reason").value }),
+      });
+      $("dope-dialog").close();
+      await loadRoute();
+      toast("Dope unassigned");
+    } catch (err) { toast(err.message); }
+  };
+  $("unassign-reason").focus();
 }
 
 function bindVersionControls(d) {
