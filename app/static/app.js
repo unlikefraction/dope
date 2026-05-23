@@ -510,8 +510,7 @@ function openCompleteDope(d) {
     <div class="modal-topbar is-visible"><strong>Doped</strong><button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button></div>
     <div class="modal-content">
       <h2>${escapeHtml(d.title)}</h2>
-      <label>Commit links<textarea id="commit-links" rows="5" placeholder="One or more links, comma or newline separated"></textarea></label>
-      <label>Completion description<textarea id="completion-description" rows="4" placeholder="Optional"></textarea></label>
+      <label>Doped description with commit links<textarea id="completion-text" rows="12" placeholder="Write what changed and include at least one commit link"></textarea></label>
     </div>
     <div class="modal-action-bar">
       <button id="confirm-complete" class="primary-wide" value="default"><i class="ph ph-confetti"></i>Doped</button>
@@ -519,9 +518,8 @@ function openCompleteDope(d) {
   `;
   $("confirm-complete").onclick = async (event) => {
     event.preventDefault();
-    const links = $("commit-links").value.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
     try {
-      await api(`/api/dopes/${d.id}/complete`, { method: "POST", body: JSON.stringify({ commit_links: links, completion_description: $("completion-description").value }) });
+      await api(`/api/dopes/${d.id}/complete`, { method: "POST", body: JSON.stringify({ completion_text: $("completion-text").value }) });
       $("dope-dialog").close();
       await loadRoute();
       toast("Dope completed");

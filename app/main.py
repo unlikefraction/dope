@@ -205,7 +205,8 @@ class DopeEditIn(BaseModel):
 
 
 class CompleteIn(BaseModel):
-    commit_links: list[str] = Field(min_length=1, max_length=20)
+    completion_text: str | None = Field(default=None, max_length=30_000)
+    commit_links: list[str] = Field(default_factory=list, max_length=50)
     completion_description: str = Field(default="", max_length=20_000)
 
 
@@ -224,6 +225,17 @@ def parse_time_to_minutes(value: str) -> int:
     if minutes <= 0 or minutes > 60 * 24 * 365:
         raise HTTPException(status_code=400, detail="Time must be greater than zero")
     return max(1, round(minutes))
+
+
+def extract_http_links(value: str) -> list[str]:
+    links: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(r"https?://[^\s<>)\"']+", value):
+        url = match.group(0).rstrip(".,;:]}")
+        if url not in seen:
+            seen.add(url)
+            links.append(url)
+    return links
 
 
 def status_for(row: sqlite3.Row) -> str:
@@ -639,12 +651,16 @@ def unassign_dope(dope_id: int, user_cookie: str | None = Cookie(default=None, a
 @app.post("/api/dopes/{dope_id}/complete")
 def complete_dope(dope_id: int, data: CompleteIn, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
     user = current_user(user_cookie)
+    completion_text = data.completion_text.strip() if data.completion_text is not None else data.completion_description.strip()
+    raw_links = extract_http_links(completion_text) if data.completion_text is not None else data.commit_links
     clean_links = []
-    for link in data.commit_links:
+    for link in raw_links:
         url = link.strip()
         if not re.match(r"^https?://", url):
             raise HTTPException(status_code=400, detail="Commit links must start with http:// or https://")
         clean_links.append(url)
+    if not clean_links:
+        raise HTTPException(status_code=400, detail="Add at least one commit link")
     completed_at = now_iso()
     with db() as conn:
         row = conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone()
@@ -658,7 +674,7 @@ def complete_dope(dope_id: int, data: CompleteIn, user_cookie: str | None = Cook
             SET completed_by = ?, completed_at = ?, completion_description = ?, assigned_to = NULL, assigned_at = NULL
             WHERE id = ?
             """,
-            (user["id"], completed_at, data.completion_description.strip(), dope_id),
+            (user["id"], completed_at, completion_text, dope_id),
         )
         conn.executemany(
             "INSERT INTO commit_links (dope_id, url, created_at) VALUES (?, ?, ?)",
