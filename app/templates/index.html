@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ede8e0">
   <title>Dopes</title>
-  <link rel="icon" type="image/png" href="/static/si-logo-light.png?v=20260527-profile1">
-  <link rel="apple-touch-icon" href="/static/si-logo-light.png?v=20260527-profile1">
+  <link rel="icon" type="image/png" href="/static/si-logo-light.png?v=20260527-profile2">
+  <link rel="apple-touch-icon" href="/static/si-logo-light.png?v=20260527-profile2">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/regular/style.css">
-  <link rel="stylesheet" href="/static/app.css?v=20260527-profile1">
+  <link rel="stylesheet" href="/static/app.css?v=20260527-profile2">
   <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
-  <script src="/static/app.js?v=20260527-profile1" defer></script>
+  <script src="/static/app.js?v=20260527-profile2" defer></script>
 </head>
 <body>
   <div id="toast" class="toast" hidden></div>
@@ -134,7 +134,7 @@
   </dialog>
 
   <dialog id="profile-dialog">
-    <form method="dialog" class="modal small">
+    <form method="dialog" class="modal small profile-modal">
       <button class="icon-close" value="cancel" aria-label="Close"><i class="ph ph-x"></i></button>
       <h2>Profile</h2>
       <label>Display name<input id="profile-display-name" autocomplete="name" placeholder="Display name"></label>
@@ -144,6 +144,14 @@
           <input id="profile-color-hex" autocomplete="off" spellcheck="false" placeholder="#1a1a1a">
         </div>
       </label>
+      <div class="color-presets" aria-label="Preset colors">
+        <button type="button" data-profile-color="#1a1a1a" style="--swatch:#1a1a1a"></button>
+        <button type="button" data-profile-color="#ffbb00" style="--swatch:#ffbb00"></button>
+        <button type="button" data-profile-color="#5a9a6b" style="--swatch:#5a9a6b"></button>
+        <button type="button" data-profile-color="#2e6f8e" style="--swatch:#2e6f8e"></button>
+        <button type="button" data-profile-color="#7a4d8e" style="--swatch:#7a4d8e"></button>
+        <button type="button" data-profile-color="#9a4d42" style="--swatch:#9a4d42"></button>
+      </div>
       <div class="color-preview">
         <span id="profile-color-preview"></span>
         <span>Your progress chart block color</span>

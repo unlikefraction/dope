@@ -845,6 +845,9 @@ function syncProfileColorInputs(source) {
   $("profile-color").value = color;
   $("profile-color-hex").value = color.toLowerCase();
   $("profile-color-preview").style.background = color;
+  document.querySelectorAll("[data-profile-color]").forEach((button) => {
+    button.classList.toggle("is-selected", button.dataset.profileColor.toLowerCase() === color.toLowerCase());
+  });
 }
 
 function openProfile() {
@@ -854,7 +857,7 @@ function openProfile() {
   $("profile-display-name").value = displayName;
   $("profile-color").value = color;
   $("profile-color-hex").value = color;
-  $("profile-color-preview").style.background = color;
+  syncProfileColorInputs("color");
   $("profile-display-name").oninput = () => draftWrite("profile", { display_name: $("profile-display-name").value, color: $("profile-color").value });
   $("profile-color").oninput = () => {
     syncProfileColorInputs("color");
@@ -864,6 +867,14 @@ function openProfile() {
     syncProfileColorInputs("hex");
     draftWrite("profile", { display_name: $("profile-display-name").value, color: $("profile-color").value });
   };
+  document.querySelectorAll("[data-profile-color]").forEach((button) => {
+    button.onclick = (event) => {
+      event.preventDefault();
+      $("profile-color").value = button.dataset.profileColor;
+      syncProfileColorInputs("color");
+      draftWrite("profile", { display_name: $("profile-display-name").value, color: $("profile-color").value });
+    };
+  });
   $("profile-save").onclick = async (event) => {
     event.preventDefault();
     try {
