@@ -140,3 +140,49 @@ def test_dependent_count_includes_transitive_children(tmp_path, monkeypatch):
     assert [item["title"] for item in by_title["C"]["dependents"]] == ["B", "A"]
     assert [item["depth"] for item in by_title["C"]["dependents"]] == [1, 2]
     assert by_title["B"]["dependent_count"] == 1
+
+
+def test_api_key_can_manage_dopes(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+
+    with TestClient(main.app) as client:
+        client.post(
+            "/api/auth/signup",
+            json={"username": "shubham", "password": "password", "display_name": "Shubham"},
+        )
+        client.post("/api/auth/login", json={"username": "shubham", "password": "password"})
+        created = client.post("/api/me/keys", json={"name": "Codex"}).json()
+        key = created["key"]
+        headers = {"Authorization": f"Bearer {key}"}
+
+        me = client.get("/api/me", headers=headers)
+        assert me.status_code == 200
+        assert me.json()["display_name"] == "Shubham"
+
+        dope = client.post(
+            "/api/dopes",
+            headers=headers,
+            json={"title": "API managed", "description_html": "<p>From API</p>", "time_text": "30min", "dependency_ids": []},
+        )
+        assert dope.status_code == 200
+        dope_id = dope.json()["id"]
+
+        assigned = client.post(f"/api/dopes/{dope_id}/assign", headers=headers)
+        assert assigned.status_code == 200
+        assert assigned.json()["assigned_to"]["display_name"] == "Shubham"
+
+        completed = client.post(
+            f"/api/dopes/{dope_id}/complete",
+            headers=headers,
+            json={"completion_text": "Done in API https://github.com/teamofsilicons/dope/commit/abc123"},
+        )
+        assert completed.status_code == 200
+        assert completed.json()["status"] == "completed"
+
+        active = client.get("/api/dopes?status=active", headers=headers)
+        assert active.status_code == 200
+
+        client.delete(f"/api/me/keys/{created['id']}")
+        client.cookies.clear()
+        unauthorized = client.get("/api/me", headers=headers)
+        assert unauthorized.status_code == 401

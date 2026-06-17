@@ -189,6 +189,18 @@ dialog::backdrop { background: rgba(26,26,26,0.42); backdrop-filter: blur(4px); 
 .color-presets button.is-selected { border-color: var(--fg); box-shadow: inset 0 0 0 2px var(--bg); }
 .color-preview { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); background: var(--bg-3); padding: 10px; color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; }
 #profile-color-preview { width: 42px; height: 24px; border: 1px solid var(--fg); display: inline-block; flex: 0 0 auto; }
+.api-key-panel { margin: 20px 0 0; border-top: 1px solid var(--border); padding-top: 18px; }
+.api-key-panel h3 { margin: 0 0 10px; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; font-family: var(--font-mono); color: var(--fg-dim); }
+.api-key-create { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 10px; }
+.api-key-created { display: grid; gap: 8px; border: 1px solid var(--fg); background: var(--bg-3); padding: 10px; margin-bottom: 10px; }
+.api-key-created span { color: var(--fg-muted); font-size: 12px; font-weight: 800; }
+.api-key-created code { display: block; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; line-height: 1.45; }
+.api-key-list { display: grid; gap: 7px; }
+.api-key-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; border: 1px solid var(--border); background: var(--bg-3); padding: 10px; }
+.api-key-row strong { display: block; font-size: 14px; }
+.api-key-row small { display: block; margin-top: 3px; color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; }
+.api-key-row button { min-height: 32px; padding: 0 10px; }
+.api-key-row.is-revoked { opacity: 0.58; }
 .history-block { margin: 24px 0 0; padding: 12px; border: 1px solid var(--border); background: var(--bg-3); }
 .history-block h2 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.12em; color: var(--fg-dim); font-family: var(--font-mono); text-transform: uppercase; }
 .history { margin: 0; padding: 0; list-style: none; display: grid; gap: 7px; color: var(--fg-muted); font-size: 13px; line-height: 1.45; }
@@ -224,6 +236,7 @@ dialog::backdrop { background: rgba(26,26,26,0.42); backdrop-filter: blur(4px); 
   .dope-card .pill { justify-self: start; }
   .card-pills { justify-content: flex-start; }
   .grid-two { grid-template-columns: 1fr; }
+  .api-key-create, .api-key-row { grid-template-columns: 1fr; }
   .modal-headline { flex-direction: column; }
   .modal-action-bar { justify-content: stretch; flex-wrap: wrap; }
   .action-text, .primary-wide { flex: 1 1 auto; }

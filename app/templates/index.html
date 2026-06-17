@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ede8e0">
   <title>Dopes</title>
-  <link rel="icon" type="image/png" href="/static/si-logo-light.png?v=20260527-dependents1">
-  <link rel="apple-touch-icon" href="/static/si-logo-light.png?v=20260527-dependents1">
+  <link rel="icon" type="image/png" href="/static/si-logo-light.png?v=20260618-apikey1">
+  <link rel="apple-touch-icon" href="/static/si-logo-light.png?v=20260618-apikey1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/regular/style.css">
-  <link rel="stylesheet" href="/static/app.css?v=20260527-dependents1">
+  <link rel="stylesheet" href="/static/app.css?v=20260618-apikey1">
   <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
-  <script src="/static/app.js?v=20260527-dependents1" defer></script>
+  <script src="/static/app.js?v=20260618-apikey1" defer></script>
 </head>
 <body>
   <div id="toast" class="toast" hidden></div>
@@ -160,6 +160,19 @@
         <span id="profile-color-preview"></span>
         <span>Your progress chart block color</span>
       </div>
+      <section class="api-key-panel">
+        <h3>API keys</h3>
+        <div id="api-key-created" class="api-key-created" hidden>
+          <span>Copy this key now. It will not be shown again.</span>
+          <code id="api-key-value"></code>
+          <button id="api-key-copy" class="secondary" type="button"><i class="ph ph-copy"></i>Copy key</button>
+        </div>
+        <div class="api-key-create">
+          <input id="api-key-name" autocomplete="off" placeholder="Key name">
+          <button id="api-key-create" class="secondary" type="button"><i class="ph ph-key"></i>Generate</button>
+        </div>
+        <div id="api-key-list" class="api-key-list"></div>
+      </section>
       <div class="modal-actions">
         <button id="profile-save" value="default">Save profile</button>
       </div>

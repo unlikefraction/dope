@@ -886,6 +886,37 @@ function syncProfileColorInputs(source) {
   });
 }
 
+function renderApiKeys(keys = []) {
+  const list = $("api-key-list");
+  if (!list) return;
+  const rows = keys.length ? keys.map((key) => `
+    <div class="api-key-row ${key.revoked_at ? "is-revoked" : ""}">
+      <span>
+        <strong>${escapeHtml(key.name)}</strong>
+        <small>${escapeHtml(key.prefix)}... · created ${localDate(key.created_at)}${key.last_used_at ? ` · used ${localDate(key.last_used_at)}` : ""}${key.revoked_at ? " · revoked" : ""}</small>
+      </span>
+      ${key.revoked_at ? "" : `<button class="danger" type="button" data-api-key-revoke="${key.id}"><i class="ph ph-trash"></i>Revoke</button>`}
+    </div>
+  `).join("") : `<p class="empty mini">No API keys yet.</p>`;
+  list.innerHTML = rows;
+  document.querySelectorAll("[data-api-key-revoke]").forEach((button) => {
+    button.onclick = async (event) => {
+      event.preventDefault();
+      await api(`/api/me/keys/${button.dataset.apiKeyRevoke}`, { method: "DELETE" });
+      await loadApiKeys();
+      toast("API key revoked");
+    };
+  });
+}
+
+async function loadApiKeys() {
+  try {
+    renderApiKeys(await api("/api/me/keys"));
+  } catch (err) {
+    renderApiKeys([]);
+  }
+}
+
 function openProfile() {
   const draft = draftRead("profile", {});
   const displayName = draft.display_name || state.user.display_name || "";
@@ -911,6 +942,34 @@ function openProfile() {
       draftWrite("profile", { display_name: $("profile-display-name").value, color: $("profile-color").value });
     };
   });
+  $("api-key-created").hidden = true;
+  $("api-key-value").textContent = "";
+  $("api-key-name").value = "";
+  $("api-key-create").onclick = async (event) => {
+    event.preventDefault();
+    try {
+      const created = await api("/api/me/keys", {
+        method: "POST",
+        body: JSON.stringify({ name: $("api-key-name").value || "API key" }),
+      });
+      $("api-key-value").textContent = created.key;
+      $("api-key-created").hidden = false;
+      $("api-key-name").value = "";
+      await loadApiKeys();
+    } catch (err) { toast(err.message); }
+  };
+  $("api-key-copy").onclick = async (event) => {
+    event.preventDefault();
+    const value = $("api-key-value").textContent;
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      toast("API key copied");
+    } catch {
+      toast("Could not copy key");
+    }
+  };
+  loadApiKeys();
   $("profile-save").onclick = async (event) => {
     event.preventDefault();
     try {

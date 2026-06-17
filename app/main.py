@@ -13,7 +13,7 @@ from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Cookie, FastAPI, HTTPException, Response
+from fastapi import Cookie, FastAPI, Header, HTTPException, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -128,6 +128,17 @@ def init_db() -> None:
               PRIMARY KEY (dope_id, depends_on_id),
               CHECK (dope_id != depends_on_id)
             );
+
+            CREATE TABLE IF NOT EXISTS api_keys (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              name TEXT NOT NULL,
+              key_hash TEXT NOT NULL UNIQUE,
+              prefix TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              last_used_at TEXT,
+              revoked_at TEXT
+            );
             """
         )
         conn.execute(
@@ -210,7 +221,25 @@ def set_session(response: Response, user_id: int) -> None:
     )
 
 
-def current_user(dope_session: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> sqlite3.Row:
+def hash_api_key(key: str) -> str:
+    return hmac.new(SECRET_KEY.encode(), key.encode(), hashlib.sha256).hexdigest()
+
+
+def current_user(dope_session: str | None = None, authorization: str | None = None) -> sqlite3.Row:
+    if authorization and authorization.lower().startswith("bearer "):
+        key = authorization.split(" ", 1)[1].strip()
+        if key:
+            digest = hash_api_key(key)
+            with db() as conn:
+                api_key = conn.execute(
+                    "SELECT * FROM api_keys WHERE key_hash = ? AND revoked_at IS NULL",
+                    (digest,),
+                ).fetchone()
+                if api_key:
+                    conn.execute("UPDATE api_keys SET last_used_at = ? WHERE id = ?", (now_iso(), api_key["id"]))
+                    user = conn.execute("SELECT * FROM users WHERE id = ?", (api_key["user_id"],)).fetchone()
+                    if user:
+                        return user
     payload = unsign(dope_session)
     if not payload:
         raise HTTPException(status_code=401, detail="Not signed in")
@@ -253,6 +282,10 @@ class CompleteIn(BaseModel):
 class ProfileIn(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class ApiKeyIn(BaseModel):
+    name: str = Field(default="API key", min_length=1, max_length=80)
 
 
 def parse_time_to_minutes(value: str) -> int:
@@ -589,13 +622,20 @@ def logout(response: Response) -> dict[str, Any]:
 
 
 @app.get("/api/me")
-def me(user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
-    return user_public(current_user(user_cookie))  # type: ignore[return-value]
+def me(
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    return user_public(current_user(user_cookie, authorization))  # type: ignore[return-value]
 
 
 @app.patch("/api/me")
-def update_me(data: ProfileIn, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
-    user = current_user(user_cookie)
+def update_me(
+    data: ProfileIn,
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    user = current_user(user_cookie, authorization)
     display_name = data.display_name.strip()
     if not display_name:
         raise HTTPException(status_code=400, detail="Display name is required")
@@ -609,9 +649,57 @@ def update_me(data: ProfileIn, user_cookie: str | None = Cookie(default=None, al
     return user_public(updated)  # type: ignore[return-value]
 
 
+@app.get("/api/me/keys")
+def list_api_keys(user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> list[dict[str, Any]]:
+    user = current_user(user_cookie)
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, name, prefix, created_at, last_used_at, revoked_at
+            FROM api_keys
+            WHERE user_id = ?
+            ORDER BY revoked_at IS NOT NULL, created_at DESC
+            """,
+            (user["id"],),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+@app.post("/api/me/keys")
+def create_api_key(data: ApiKeyIn, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
+    user = current_user(user_cookie)
+    key = f"dope_{secrets.token_urlsafe(32)}"
+    prefix = key[:14]
+    created_at = now_iso()
+    with db() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO api_keys (user_id, name, key_hash, prefix, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user["id"], data.name.strip() or "API key", hash_api_key(key), prefix, created_at),
+        )
+    return {"id": int(cur.lastrowid), "name": data.name.strip() or "API key", "prefix": prefix, "created_at": created_at, "key": key}
+
+
+@app.delete("/api/me/keys/{key_id}")
+def revoke_api_key(key_id: int, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
+    user = current_user(user_cookie)
+    with db() as conn:
+        row = conn.execute("SELECT * FROM api_keys WHERE id = ? AND user_id = ?", (key_id, user["id"])).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="API key not found")
+        conn.execute("UPDATE api_keys SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?", (now_iso(), key_id))
+    return {"ok": True}
+
+
 @app.get("/api/dopes")
-def list_dopes(status: str = "active", user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> list[dict[str, Any]]:
-    current_user(user_cookie)
+def list_dopes(
+    status: str = "active",
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> list[dict[str, Any]]:
+    current_user(user_cookie, authorization)
     where = {
         "active": "archived_at IS NULL AND completed_at IS NULL",
         "completed": "archived_at IS NULL AND completed_at IS NOT NULL",
@@ -693,8 +781,12 @@ def list_dopes(status: str = "active", user_cookie: str | None = Cookie(default=
 
 
 @app.get("/api/stats/progress")
-def progress_stats(days: int = 7, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> list[dict[str, Any]]:
-    current_user(user_cookie)
+def progress_stats(
+    days: int = 7,
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> list[dict[str, Any]]:
+    current_user(user_cookie, authorization)
     if days not in {7, 14, 30}:
         raise HTTPException(status_code=400, detail="Progress range must be 7, 14, or 30 days")
 
@@ -750,8 +842,12 @@ def progress_stats(days: int = 7, user_cookie: str | None = Cookie(default=None,
 
 
 @app.post("/api/dopes")
-def create_dope(data: DopeIn, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
-    user = current_user(user_cookie)
+def create_dope(
+    data: DopeIn,
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    user = current_user(user_cookie, authorization)
     minutes = parse_time_to_minutes(data.time_text)
     with db() as conn:
         cur = conn.execute(
@@ -769,8 +865,13 @@ def create_dope(data: DopeIn, user_cookie: str | None = Cookie(default=None, ali
 
 
 @app.put("/api/dopes/{dope_id}")
-def edit_dope(dope_id: int, data: DopeEditIn, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
-    user = current_user(user_cookie)
+def edit_dope(
+    dope_id: int,
+    data: DopeEditIn,
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    user = current_user(user_cookie, authorization)
     title = data.title.strip()
     edited_at = now_iso()
     with db() as conn:
@@ -788,8 +889,12 @@ def edit_dope(dope_id: int, data: DopeEditIn, user_cookie: str | None = Cookie(d
 
 
 @app.post("/api/dopes/{dope_id}/assign")
-def assign_dope(dope_id: int, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
-    user = current_user(user_cookie)
+def assign_dope(
+    dope_id: int,
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    user = current_user(user_cookie, authorization)
     assigned_at = now_iso()
     with db() as conn:
         row = conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone()
@@ -809,8 +914,13 @@ def assign_dope(dope_id: int, user_cookie: str | None = Cookie(default=None, ali
 
 
 @app.post("/api/dopes/{dope_id}/unassign")
-def unassign_dope(dope_id: int, data: UnassignIn, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
-    current_user(user_cookie)
+def unassign_dope(
+    dope_id: int,
+    data: UnassignIn,
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    current_user(user_cookie, authorization)
     unassigned_at = now_iso()
     reason = data.reason.strip()
     if not reason:
@@ -835,8 +945,13 @@ def unassign_dope(dope_id: int, data: UnassignIn, user_cookie: str | None = Cook
 
 
 @app.post("/api/dopes/{dope_id}/complete")
-def complete_dope(dope_id: int, data: CompleteIn, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
-    user = current_user(user_cookie)
+def complete_dope(
+    dope_id: int,
+    data: CompleteIn,
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    user = current_user(user_cookie, authorization)
     completion_text = data.completion_text.strip() if data.completion_text is not None else data.completion_description.strip()
     raw_links = extract_http_links(completion_text) if data.completion_text is not None else data.commit_links
     clean_links = []
@@ -877,8 +992,12 @@ def complete_dope(dope_id: int, data: CompleteIn, user_cookie: str | None = Cook
 
 
 @app.post("/api/dopes/{dope_id}/archive")
-def archive_dope(dope_id: int, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
-    user = current_user(user_cookie)
+def archive_dope(
+    dope_id: int,
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    user = current_user(user_cookie, authorization)
     with db() as conn:
         row = conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone()
         if not row:
@@ -891,8 +1010,12 @@ def archive_dope(dope_id: int, user_cookie: str | None = Cookie(default=None, al
 
 
 @app.post("/api/dopes/{dope_id}/restore")
-def restore_dope(dope_id: int, user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> dict[str, Any]:
-    current_user(user_cookie)
+def restore_dope(
+    dope_id: int,
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    current_user(user_cookie, authorization)
     with db() as conn:
         row = conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone()
         if not row:
