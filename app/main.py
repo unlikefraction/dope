@@ -637,6 +637,7 @@ def dope_payload(row: sqlite3.Row, conn: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
+@app.head("/")
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(ROOT / "templates" / "index.html")

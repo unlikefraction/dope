@@ -25,6 +25,15 @@ def test_dope_day_resets_at_9am_ist(tmp_path, monkeypatch):
     assert main.dope_day_for("2026-05-24T03:30:00+00:00") == date(2026, 5, 24)
 
 
+def test_index_supports_head_for_deploy_checks(tmp_path, monkeypatch):
+    main = load_main(tmp_path, monkeypatch)
+
+    with TestClient(main.app) as client:
+        response = client.head("/")
+
+    assert response.status_code == 200
+
+
 def test_progress_stats_groups_completed_hours_by_person(tmp_path, monkeypatch):
     main = load_main(tmp_path, monkeypatch)
 
