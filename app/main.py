@@ -321,6 +321,10 @@ class CategoryIn(BaseModel):
     color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
 
 
+class DopeCategoryIn(BaseModel):
+    category_id: int | None = Field(default=None)
+
+
 def parse_time_to_minutes(value: str) -> int:
     text = value.strip().lower()
     token_re = re.compile(r"(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m)?")
@@ -1125,6 +1129,23 @@ def complete_dope(
             """,
             (completed_at, dope_id),
         )
+        return dope_payload(conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone(), conn)
+
+
+@app.patch("/api/dopes/{dope_id}/category")
+def set_dope_category(
+    dope_id: int,
+    data: DopeCategoryIn,
+    user_cookie: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    current_user(user_cookie, authorization)
+    with db() as conn:
+        row = conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Dope not found")
+        category_id = validate_category_id(conn, data.category_id)
+        conn.execute("UPDATE dopes SET category_id = ? WHERE id = ?", (category_id, dope_id))
         return dope_payload(conn.execute("SELECT * FROM dopes WHERE id = ?", (dope_id,)).fetchone(), conn)
 
 

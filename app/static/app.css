@@ -229,6 +229,8 @@ dialog::backdrop { background: rgba(26,26,26,0.42); backdrop-filter: blur(4px); 
 @keyframes celebration-fade { 0%, 72% { opacity: 1; } 100% { opacity: 0; } }
 
 .field-label { font-weight: 800; font-size: 13px; color: var(--fg-muted); margin-bottom: 8px; }
+.inline-category { margin: 4px 0 18px; }
+.inline-category .category-choices { margin-bottom: 0; }
 .category-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
 .category-choice { min-height: 36px; padding: 0 12px; gap: 7px; background: var(--bg-3); color: var(--fg-muted); border: 1px solid var(--border); font-weight: 700; font-size: 13px; }
 .category-choice:hover { transform: none; border-color: var(--accent, var(--fg)); }

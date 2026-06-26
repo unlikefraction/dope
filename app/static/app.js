@@ -458,6 +458,52 @@ function categoryPill(cat) {
   return `<span class="category-pill" style="--accent:${escapeHtml(cat.color)}"><span class="category-dot"></span>${escapeHtml(cat.name)}</span>`;
 }
 
+function inlineCategoryHtml(d) {
+  const selected = d.category ? d.category.id : null;
+  const chips = state.categories.map((cat) => `
+    <button type="button" class="category-choice ${selected === cat.id ? "is-selected" : ""}" data-inline-category="${cat.id}" style="--accent:${escapeHtml(cat.color)}">
+      <span class="category-dot"></span>${escapeHtml(cat.name)}
+    </button>
+  `).join("");
+  const none = `<button type="button" class="category-choice category-choice-none ${selected == null ? "is-selected" : ""}" data-inline-category="">None</button>`;
+  const body = state.categories.length
+    ? `${none}${chips}`
+    : `<span class="category-empty-hint">No categories yet — add some from the tag icon in the navbar.</span>`;
+  return `
+    <div class="inline-category">
+      <span class="field-label">Category</span>
+      <div id="inline-category-picker" class="category-choices">${body}</div>
+    </div>
+  `;
+}
+
+function bindInlineCategory(d) {
+  const picker = $("inline-category-picker");
+  if (!picker) return;
+  picker.querySelectorAll("[data-inline-category]").forEach((button) => {
+    button.onclick = async (event) => {
+      event.preventDefault();
+      const raw = button.dataset.inlineCategory;
+      const categoryId = raw ? Number(raw) : null;
+      const current = d.category ? d.category.id : null;
+      if (current === categoryId) return;
+      try {
+        const updated = await api(`/api/dopes/${d.id}/category`, {
+          method: "PATCH",
+          body: JSON.stringify({ category_id: categoryId }),
+        });
+        d.category = updated.category;
+        state.dopes = state.dopes.map((it) => (it.id === updated.id ? updated : it));
+        state.allDopes = state.allDopes.map((it) => (it.id === updated.id ? updated : it));
+        cacheWrite(`dopes:${state.route}`, state.dopes);
+        picker.querySelectorAll("[data-inline-category]").forEach((b) => b.classList.toggle("is-selected", b === button));
+        render();
+        toast(updated.category ? `Category set to ${updated.category.name}` : "Category cleared");
+      } catch (err) { toast(err.message); }
+    };
+  });
+}
+
 function escapeHtml(value) {
   return String(value || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
 }
@@ -676,6 +722,7 @@ async function openDope(id) {
     d = state.allDopes.find((item) => item.id === id);
   }
   if (!d) return;
+  if (!state.categories.length) await loadCategories();
   $("modal-title").hidden = true;
   $("modal-title").textContent = d.title;
   const versions = d.versions || [];
@@ -745,7 +792,6 @@ async function openDope(id) {
       <div id="modal-title-sentinel"></div>
       <div class="modal-headline">
         <div>
-          ${d.category ? categoryPill(d.category) : ""}
           <span class="pill"><i class="ph ph-clock"></i>${formatMinutes(d.time_minutes)}</span>
           ${d.assigned_to ? `<span class="pill"><i class="ph ph-user"></i>${escapeHtml(d.assigned_to.display_name)}</span>` : ""}
           ${d.completed_by ? `<span class="pill"><i class="ph ph-check-circle"></i>${escapeHtml(d.completed_by.display_name)} on ${localDate(d.completed_at)}</span>` : ""}
@@ -754,6 +800,7 @@ async function openDope(id) {
           ${editCount ? `<button id="version-toggle" class="version-button" value="default">${editCount} ${editCount === 1 ? "edit" : "edits"}</button>` : `<span class="version-empty">no edits</span>`}
         </div>
       </div>
+      ${inlineCategoryHtml(d)}
       ${editCount ? `<label id="version-picker-wrap" class="version-picker" hidden>Read version<select id="version-picker">${versionOptions}</select></label>` : ""}
       <h2 id="dope-version-title">${escapeHtml(activeVersion.title)}</h2>
       ${dependencies}
@@ -803,6 +850,7 @@ async function openDope(id) {
   }
   bindDopeActions(d);
   bindVersionControls(d);
+  bindInlineCategory(d);
   $("dope-dialog").showModal();
   bindModalChrome(d.title);
 }
